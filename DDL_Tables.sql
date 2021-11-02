@@ -102,3 +102,64 @@ ADD CONSTRAINT [FK_tblSQL_Server_Details]
 FOREIGN KEY ([SQL_Server_Instance])     
 REFERENCES [inventory].[tblSQL_Servers] ([SQL_Server_Instance]) 
 GO
+
+DROP VIEW IF EXISTS [dbo].[vwSQL_Server_Details]
+GO
+CREATE VIEW [dbo].[vwSQL_Server_Details]
+AS
+SELECT	[SQL_Server_Instance]
+		,[SQL_Server_IP]
+		,[SQL_Server_Port]
+		,[Server_Name]
+		,[Server_Host]
+		,[Server_Domain]
+		,[SQL_Server_Edition]
+		,CASE 
+			WHEN [SQL_Server_Version] LIKE '16%' THEN '2022'
+			WHEN [SQL_Server_Version] LIKE '15%' THEN '2019'
+			WHEN [SQL_Server_Version] LIKE '14%' THEN '2017'
+			WHEN [SQL_Server_Version] LIKE '13%' THEN '2016'
+			WHEN [SQL_Server_Version] LIKE '12%' THEN '2014'
+			WHEN [SQL_Server_Version] LIKE '11%' THEN '2012'
+			WHEN [SQL_Server_Version] LIKE '10%' THEN '2008/R2'
+			ELSE 'Not Defined'
+		END [SQL_Server_Version]
+		,CASE 
+			WHEN [SQL_Server_Version] LIKE '16%' THEN 'SQL Server 2022'
+			WHEN [SQL_Server_Version] LIKE '15%' THEN 'SQL Server 2019'
+			WHEN [SQL_Server_Version] LIKE '14%' THEN 'SQL Server 2017'
+			WHEN [SQL_Server_Version] LIKE '13%' THEN 'SQL Server 2016'
+			WHEN [SQL_Server_Version] LIKE '12%' THEN 'SQL Server 2014'
+			WHEN [SQL_Server_Version] LIKE '11%' THEN 'SQL Server 2012'
+			WHEN [SQL_Server_Version] LIKE '10%' THEN 'SQL Server 2008/R2'
+			ELSE 'Not Defined'
+		END [SQL_Server_Version_Verbose]
+		,[OS_Version]
+		,[Is_Clustered]
+		,[Is_Hadr_Enabled]
+		,[User_Databases_Count]
+		,[Databases_Data_Size_GB]
+		,[Databases_TLog_Size_GB]
+		,[CPU_Count]
+		,[Physical_Memory_GB]
+		,[Committed_Target_GB]
+		,[Collation]
+		,DATEDIFF(hh, [Last_Full_Backup_Timestamp], GETDATE()) AS [Last_Full_Backup_Hours]
+		,[Last_Full_Backup_Database_Name]
+		,DATEDIFF(hh, [Last_TLog_Backup_Timestamp], GETDATE()) AS [Last_TLog_Backup_Hours]
+		,[Last_TLog_Backup_Database_Name]
+		,[Instance_Default_Data_Path]
+		,[Instance_Default_TLog_Path]
+		,[SQL_Server_Service_Account]
+		,[SQL_Server_Start_Time]
+		,[Ad_Hoc_Distributed_Queries]
+		,[Backup_Compression_Default]
+		,[CLR_Enabled]
+		,[Filestream_Access_Level]
+		,[MAXDOP]
+		,[Optimize_for_ad_hoc_Workloads]
+		,[Xp_Cmdshell]
+		,[Date_Captured]
+FROM	[load].[tblSQL_Server_Details]
+WHERE	[Server_Name] <> 'Login Failed!'
+GO
