@@ -250,7 +250,7 @@ cls
 		    @varSQL_Server_Service_Account AS [SQL_Server_Service_Account],
 		    @varSQL_Server_Start_Time AS [SQL_Server_Start_Time],
             @varAd_Hoc_Distributed_Queries AS [Ad_Hoc_Distributed_Queries],
-            @varbackup_compression_default AS [Backup_Compression_Default],
+            ISNULL(@varbackup_compression_default,0) AS [Backup_Compression_Default],
             @varclr_enabled AS [CLR_Enabled],
             @varfilestream_access_level AS [Filestream_Access_Level],
             @varMAXDOP AS [MAXDOP],
