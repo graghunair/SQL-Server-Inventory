@@ -1,7 +1,12 @@
+<#
+Install-Module -Name SqlServer -AllowClobber
+Import-Module -Name SqlServer -Force
+Get-Command -Module SqlServer
+#>
 cls
 
 #Variable Declarations and Initiations
-    [string]$varDBA_Server_Name ="<Server-Name>"
+    [string]$varDBA_Server_Name = "<Server-Name>"
     [string]$varDBA_Database_Name = "DBA_Inventory"
     [string]$varTarget_Database_Name = "master"
     [string[]]$varSQL_Servers_Succeeded = New-Object System.Collections.ArrayList
@@ -9,12 +14,17 @@ cls
     [int]$varCount_Succeeded = 0
     [int]$varCount_Failed = 0
     [string]$varSQL_Server_Name = ""
-    [string]$varIns_SQL_Text = ""
+    [string]$varIns_SQL_Server_Details = ""
+    [string]$varIns_SQL_Server_AOAG_Details = ""
+    [string]$varIns_SQL_Server_Disk_Drives = ""
 
 #T-SQL Queries
     $varTruncate_Query =
 @"
     TRUNCATE TABLE [load].[tblSQL_Server_Details]
+    TRUNCATE TABLE [load].[tblSQL_Server_AOAG_Details]
+    TRUNCATE TABLE [load].[tblSQL_Server_Disk_Drives]
+    GO
 "@
 
     $varGetSQL_Servers =
@@ -40,7 +50,6 @@ cls
     DECLARE @varSQL_Server_Start_Time DATETIME
     DECLARE @varDatabases_Data_Size_GB DECIMAL(10,2)
     DECLARE @varDatabases_TLog_Size_GB DECIMAL(10,2)
-    DECLARE @varFile_System_Storage XML
     DECLARE @varSQL_Server_Service_Account NVARCHAR(256)
     DECLARE	@varAd_Hoc_Distributed_Queries TINYINT
     DECLARE	@varbackup_compression_default TINYINT
@@ -64,10 +73,7 @@ cls
             EXEC sp_executesql @varSQL_Text, @var_Parameters, @varOS_Version = @varOS_Version OUTPUT
         END
 
-    EXEC master..xp_regread		N'HKEY_LOCAL_MACHINE',
-							    N'SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\',
-							    @value_name = 'Domain',
-							    @value = @varDomain OUTPUT
+    SELECT @varDomain = DEFAULT_DOMAIN()
 
     SELECT	@varDatabases_Count = COUNT(1)
     FROM	sys.databases 
@@ -188,15 +194,6 @@ cls
 			ORDER BY	2
 		END
 
-	SET		@varFile_System_Storage = 
-				    (SELECT		DISTINCT volume_mount_point as Drive,   
-							    CAST(CAST(total_bytes/1024./1024./1024. AS DECIMAL(20,2)) AS INT) AS [Total_GB],   
-							    CAST(CAST(available_bytes/1024./1024./1024. AS DECIMAL(20,2)) AS INT) AS [Free_GB]
-				    FROM		sys.master_files AS f  
-				    CROSS APPLY sys.dm_os_volume_stats(f.database_id, f.file_id)  [File_System_Storage]
-				    ORDER BY 1  
-				    FOR XML AUTO, ELEMENTS)
-
     SELECT		@varSQL_Server_Service_Account = [service_account]
 	FROM		sys.dm_server_services AS [SQL_Server_Services]
 	WHERE		[filename]  LIKE '%sqlservr.exe%'
@@ -235,8 +232,7 @@ cls
 		    ISNULL(SERVERPROPERTY('IsHadrEnabled'),0) AS [Is_Hadr_Enabled],
 		    @varDatabases_Count AS [User_Databases_Count],
             @varDatabases_Data_Size_GB AS [Databases_Data_Size_GB],
-		    @varDatabases_TLog_Size_GB AS [Databases_TLog_Size_GB],
-		    @varFile_System_Storage AS [File_System_Storage],
+		    @varDatabases_TLog_Size_GB AS [Databases_TLog_Size_GB],		    
 		    @varCPU_Count AS [CPU_Count],
 		    @varPhysical_Memory_GB AS [Physical_Memory_GB],
 		    @varCommitted_Target_GB AS [Committed_Target_GB],
@@ -259,11 +255,57 @@ cls
     GO
 "@
 
+    $varGetSQL_Server_AOAG_Details = 
+@"
+    SET NOCOUNT ON
+    GO
+    IF(SERVERPROPERTY('IsHadrEnabled') = 1)
+	    BEGIN
+		    SELECT		SERVERPROPERTY('ServerName') AS [SQL_Server_Instance],
+					    ISNULL(AGL.[dns_name],'') AS [Listener_Name], 
+					    ISNULL(AGL.[port],0) AS [Listener_Port],
+					    ISNULL(REPLACE(REPLACE(REPLACE(AGL.[ip_configuration_string_from_cluster], '(', ''), ')', ''),'''', ''), '') AS [Listener_IP], 
+					    ARS.[role_desc] AS [AG_Role], 
+					    AG.[name] AS [AG_Name],
+					    AR.[availability_mode_desc] AS [AG_Availability_Mode], 
+					    AR.[failover_mode_desc] AS [AG_Failover_Mode],
+					    AGS.[synchronization_health_desc] AS [AG_Sync_Health],
+					    GETDATE() AS [Date_Captured]
+		    FROM		sys.dm_hadr_availability_group_states AGS
+		    INNER JOIN	sys.dm_hadr_availability_replica_states ARS
+				    ON	AGS.group_id = ARS.group_id
+		    INNER JOIN	sys.availability_groups AG
+				    ON	AGS.group_id = AG.group_id
+		    INNER JOIN	sys.availability_replicas AR
+				    ON	AR.replica_id = ARS.replica_id
+		    LEFT OUTER JOIN sys.availability_group_listeners AGL
+				    ON	AGL.group_id = AGS.group_id	
+		    WHERE		ARS.is_local = 1
+	    END
+    GO
+"@
+
+    $varGetSQL_Server_Disk_Drives = 
+@"
+    SET NOCOUNT ON
+    GO
+    SELECT		DISTINCT SERVERPROPERTY('ServerName') AS [SQL_Server_Instance],
+                SERVERPROPERTY('ComputerNamePhysicalNetBIOS') AS [Server_Host],
+			    [volume_mount_point] AS [Drive],
+			    [logical_volume_name] AS [Volume_Name], 
+			    CAST(CAST([total_bytes]/1024./1024./1024. AS DECIMAL(20,2)) AS INT) AS [Total_GB],   
+			    CAST(CAST([available_bytes]/1024./1024./1024. AS DECIMAL(20,2)) AS INT) AS [Free_GB],
+			    GETDATE() AS [Date_Captured]
+    FROM		sys.master_files f
+    CROSS APPLY sys.dm_os_volume_stats(f.database_id, f.file_id)
+    GO
+"@
+
 #Tuncate existing old data before fresh capture
-    Invoke-Sqlcmd -ServerInstance $varDBA_Server_Name -Database $varDBA_Database_Name -Query $varTruncate_Query
+    Invoke-Sqlcmd -ServerInstance $varDBA_Server_Name -Database $varDBA_Database_Name -Query $varTruncate_Query -TrustServerCertificate
 
 #Get a list of SQL Servers
-    $varSQL_Servers = Invoke-Sqlcmd -ServerInstance $varDBA_Server_Name -Database $varDBA_Database_Name -Query $varGetSQL_Servers
+    $varSQL_Servers = Invoke-Sqlcmd -ServerInstance $varDBA_Server_Name -Database $varDBA_Database_Name -Query $varGetSQL_Servers -TrustServerCertificate
 
 #Loop through each SQL Server
     ForEach ($varSQL_Server in $varSQL_Servers)
@@ -273,7 +315,10 @@ cls
 
             try
                 {
-                    $varSQL_Server_Details = Invoke-Sqlcmd -ServerInstance $varSQL_Server.SQL_Server_Instance -Database $varTarget_Database_Name -Query $varGetSQL_Server_Details -ConnectionTimeout 5
+                    $varSQL_Server_Details = Invoke-Sqlcmd -ServerInstance $varSQL_Server.SQL_Server_Instance -Database $varTarget_Database_Name -Query $varGetSQL_Server_Details -ConnectionTimeout 10 -TrustServerCertificate
+                    $varSQL_Server_AOAG_Details = Invoke-Sqlcmd -ServerInstance $varSQL_Server.SQL_Server_Instance -Database $varTarget_Database_Name -Query $varGetSQL_Server_AOAG_Details -ConnectionTimeout 10 -TrustServerCertificate
+                    $varSQL_Server_Disk_Drives = Invoke-Sqlcmd -ServerInstance $varSQL_Server.SQL_Server_Instance -Database $varTarget_Database_Name -Query $varGetSQL_Server_Disk_Drives -ConnectionTimeout 10 -TrustServerCertificate
+                    
                     $varCount_Succeeded += 1  
                     $varSQ_Server_Name = $varCount_Succeeded.ToString() + ". " + $varSQL_Server.SQL_Server_Instance
                     $varSQL_Servers_Succeeded += $varSQ_Server_Name
@@ -318,11 +363,10 @@ cls
                     $varSQL_Server_Details.Filestream_Access_Level = 0
                     $varSQL_Server_Details.MAXDOP = 0
                     $varSQL_Server_Details.Optimize_for_ad_hoc_Workloads = 0
-                    $varSQL_Server_Details.Xp_Cmdshell = 0
-                    $varSQL_Server_Details.File_System_Storage = ""
+                    $varSQL_Server_Details.Xp_Cmdshell = 0                    
                 }
            
-            $varIns_SQL_Text =  "INSERT INTO [load].[tblSQL_Server_Details](" + 
+            $varIns_SQL_Server_Details =  "INSERT INTO [load].[tblSQL_Server_Details](" + 
                                             "[SQL_Server_Instance], " +
                                             "[SQL_Server_IP], " + 
                                             "[SQL_Server_Port], " + 
@@ -355,8 +399,7 @@ cls
                                             "[Filestream_Access_Level]," +
                                             "[MAXDOP]," +
                                             "[Optimize_for_ad_hoc_Workloads]," +
-                                            "[Xp_Cmdshell]," +                                            
-                                            "[File_System_Storage]) " + 
+                                            "[Xp_Cmdshell]) " + 
                                         "VALUES " + 
                                         "('" + 
                                             $varSQL_Server.SQL_Server_Instance + "', '" + 
@@ -391,13 +434,69 @@ cls
                                             $varSQL_Server_Details.Filestream_Access_Level + ", " +
                                             $varSQL_Server_Details.MAXDOP + ", " +
                                             $varSQL_Server_Details.Optimize_for_ad_hoc_Workloads + ", " +
-                                            $varSQL_Server_Details.Xp_Cmdshell + ", '" +
-                                            $varSQL_Server_Details.File_System_Storage +                                             
-                                        "')" 
-            #$varIns_SQL_Text
+                                            $varSQL_Server_Details.Xp_Cmdshell +                                                                                  
+                                        ")" 
+            #$varIns_SQL_Server_Details
+            #Insert SQL Server AOAG Details into the load table
+            Invoke-Sqlcmd -ServerInstance $varDBA_Server_Name -Database $varDBA_Database_Name -Query $varIns_SQL_Server_Details -TrustServerCertificate
+
+            ForEach ($varSQL_Server_AOAG_Detail in $varSQL_Server_AOAG_Details)
+                {
+                    $varIns_SQL_Server_AOAG_Details =  "INSERT INTO [load].[tblSQL_Server_AOAG_Details](" + 
+                                                    "[SQL_Server_Instance], " +
+                                                    "[Listener_Name], " + 
+                                                    "[Listener_Port], " + 
+                                                    "[Listener_IP], " + 
+                                                    "[AG_Role], " +
+                                                    "[AG_Name], " + 
+                                                    "[AG_Availability_Mode], " + 
+                                                    "[AG_Failover_Mode], " + 
+                                                    "[AG_Sync_Health], " +                                                                                     
+                                                    "[Date_Captured]) " + 
+                                                "VALUES " + 
+                                                "('" + 
+                                                    $varSQL_Server_AOAG_Detail.SQL_Server_Instance + "', '" + 
+                                                    $varSQL_Server_AOAG_Detail.Listener_Name + "', " + 
+                                                    $varSQL_Server_AOAG_Detail.Listener_Port +", '" + 
+                                                    $varSQL_Server_AOAG_Detail.Listener_IP + "', '" + 
+                                                    $varSQL_Server_AOAG_Detail.AG_Role + "', '" + 
+                                                    $varSQL_Server_AOAG_Detail.AG_Name + "', '" + 
+                                                    $varSQL_Server_AOAG_Detail.AG_Availability_Mode + "', '" + 
+                                                    $varSQL_Server_AOAG_Detail.AG_Failover_Mode + "', '" + 
+                                                    $varSQL_Server_AOAG_Detail.AG_Sync_Health + "', '" +                                                   
+                                                    $varSQL_Server_AOAG_Detail.Date_Captured +                                             
+                                                "')" 
             
-            #Insert SQL Server Details into the inventory table
-            Invoke-Sqlcmd -ServerInstance $varDBA_Server_Name -Database $varDBA_Database_Name -Query $varIns_SQL_Text
+                    #$varIns_SQL_Server_AOAG_Details
+                    #Insert SQL Server Details into the inventory table
+                    Invoke-Sqlcmd -ServerInstance $varDBA_Server_Name -Database $varDBA_Database_Name -Query $varIns_SQL_Server_AOAG_Details -TrustServerCertificate
+                }
+
+            ForEach ($varSQL_Server_Disk_Drive in $varSQL_Server_Disk_Drives)
+                {
+                    $varIns_SQL_Server_Disk_Drives =  "INSERT INTO [load].[tblSQL_Server_Disk_Drives](" + 
+                                                    "[SQL_Server_Instance], " +
+                                                    "[Server_Host], " +
+                                                    "[Drive], " + 
+                                                    "[Volume_Name], " + 
+                                                    "[Total_GB], " + 
+                                                    "[Free_GB], " +                                                                                                                                    
+                                                    "[Date_Captured]) " + 
+                                                "VALUES " + 
+                                                "('" + 
+                                                    $varSQL_Server_Disk_Drive.SQL_Server_Instance + "', '" + 
+                                                    $varSQL_Server_Disk_Drive.Server_Host + "', '" + 
+                                                    $varSQL_Server_Disk_Drive.Drive + "', '" + 
+                                                    $varSQL_Server_Disk_Drive.Volume_Name +"', " + 
+                                                    $varSQL_Server_Disk_Drive.Total_GB + ", " + 
+                                                    $varSQL_Server_Disk_Drive.Free_GB + ", '" +                                              
+                                                    $varSQL_Server_Disk_Drive.Date_Captured +                                             
+                                                "')" 
+            
+                    #$varIns_SQL_Server_Disk_Drives
+                    #Insert SQL Server Disk Drive Details into the load table
+                    Invoke-Sqlcmd -ServerInstance $varDBA_Server_Name -Database $varDBA_Database_Name -Query $varIns_SQL_Server_Disk_Drives -TrustServerCertificate
+                }            
         }
 
 Write-Host " "
