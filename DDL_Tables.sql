@@ -21,6 +21,10 @@ USE [DBA_Inventory]
 GO
 DROP TABLE IF EXISTS [load].[tblSQL_Server_Details]
 GO
+DROP TABLE IF EXISTS [load].[tblSQL_Server_AOAG_Details]
+GO
+DROP TABLE IF EXISTS [load].[tblSQL_Server_Disk_Drives]
+GO
 DROP SCHEMA IF EXISTS [load]
 GO
 DROP TABLE IF EXISTS [inventory].[tblSQL_Servers]
@@ -83,14 +87,12 @@ CREATE TABLE [load].[tblSQL_Server_Details](
       [Filestream_Access_Level] [tinyint] NULL,
       [MAXDOP] [tinyint] NULL,
       [Optimize_for_ad_hoc_Workloads] [bit] NULL,
-      [Xp_Cmdshell] [bit] NULL,
-      [File_System_Storage] [xml] NULL,
-      [AG_Properties] [xml] NULL,
+      [Xp_Cmdshell] [bit] NULL,      
       [Date_Captured] [datetime] NOT NULL,
  CONSTRAINT [PK_Load_tblSQL_Server_Details] PRIMARY KEY NONCLUSTERED
 (
       [SQL_Server_Instance] ASC
-)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) 
+)
 ) 
 GO
 
@@ -102,6 +104,39 @@ REFERENCES [inventory].[tblSQL_Servers] ([SQL_Server_Instance])
 GO
 
 ALTER TABLE [load].[tblSQL_Server_Details] CHECK CONSTRAINT [FK_tblSQL_Server_Details]
+GO
+
+DROP TABLE IF EXISTS [load].[tblSQL_Server_AOAG_Details]
+GO
+CREATE TABLE [load].[tblSQL_Server_AOAG_Details](
+	[SQL_Server_Instance] [nvarchar](128) NULL,
+	[Listener_Name] [nvarchar](63) NULL,
+	[Listener_Port] [int] NULL,
+	[Listener_IP] [nvarchar](4000) NULL,
+	[AG_Role] [nvarchar](60) NULL,
+	[AG_Name] [sysname] NULL,
+	[AG_Availability_Mode] [nvarchar](60) NULL,
+	[AG_Failover_Mode] [nvarchar](60) NULL,
+	[AG_Sync_Health] [nvarchar](60) NULL,
+	[Date_Captured] [datetime] NOT NULL
+)
+GO
+ALTER TABLE [load].[tblSQL_Server_AOAG_Details] ADD  CONSTRAINT [DF_load_tblSQL_Server_AOAG_Details_Date_Created]  DEFAULT (getdate()) FOR [Date_Captured]
+GO
+
+DROP TABLE IF EXISTS [load].[tblSQL_Server_Disk_Drives]
+GO
+CREATE TABLE [load].[tblSQL_Server_Disk_Drives](
+	[SQL_Server_Instance] [nvarchar](128) NULL,
+	[Server_Host] [nvarchar](128) NULL,
+	[Drive] [nvarchar](256) NULL,
+	[Volume_Name] [nvarchar](256) NULL,
+	[Total_GB] [int] NULL,
+	[Free_GB] [int] NULL,
+	[Date_Captured] [datetime] NOT NULL)
+GO
+
+ALTER TABLE [load].[tblSQL_Server_Disk_Drives] ADD  CONSTRAINT [DF_load_tblSQL_Server_Disk_Drives_Date_Created]  DEFAULT (getdate()) FOR [Date_Captured]
 GO
 
 DROP VIEW IF EXISTS [dbo].[vwSQL_Server_Details]
