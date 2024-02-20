@@ -315,7 +315,8 @@ cls
 
             try
                 {
-                    $varSQL_Server_Details = Invoke-Sqlcmd -ServerInstance $varSQL_Server.SQL_Server_Instance -Database $varTarget_Database_Name -Query $varGetSQL_Server_Details -ConnectionTimeout 10 -TrustServerCertificate
+                    $varSQL_Server_AOAG_Details = ''
+		    $varSQL_Server_Details = Invoke-Sqlcmd -ServerInstance $varSQL_Server.SQL_Server_Instance -Database $varTarget_Database_Name -Query $varGetSQL_Server_Details -ConnectionTimeout 10 -TrustServerCertificate
                     $varSQL_Server_AOAG_Details = Invoke-Sqlcmd -ServerInstance $varSQL_Server.SQL_Server_Instance -Database $varTarget_Database_Name -Query $varGetSQL_Server_AOAG_Details -ConnectionTimeout 10 -TrustServerCertificate
                     $varSQL_Server_Disk_Drives = Invoke-Sqlcmd -ServerInstance $varSQL_Server.SQL_Server_Instance -Database $varTarget_Database_Name -Query $varGetSQL_Server_Disk_Drives -ConnectionTimeout 10 -TrustServerCertificate
                     
